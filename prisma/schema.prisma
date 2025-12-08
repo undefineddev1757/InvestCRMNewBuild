@@ -1,0 +1,566 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id                String             @id @default(cuid())
+  name              String?
+  email             String             @unique
+  emailVerified     DateTime?
+  image             String?
+  password          String?
+  phone             String?
+  role              Role               @default(USER)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  accounts          Account[]
+  sessions          Session[]
+  financialAccounts FinancialAccount[]
+  tradingAccounts   TradingAccount[]
+  transactions      Transaction[]
+}
+
+// Клиенты (копия основных полей из модели User)
+model Client {
+  id            String      @id @default(cuid())
+  name          String?
+  email         String      @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  phone         String?
+  isActive      Boolean     @default(true)
+  accessLevel   AccessLevel @default(BASE) // Уровень доступа для ограничения плеча
+
+  // Детальные права доступа
+  canCreateDeals       Boolean @default(true) // Возможность создавать сделки
+  canCreateWithdrawals Boolean @default(true) // Возможность создавать заявки на вывод
+  canCreateTickets     Boolean @default(true) // Возможность создавать обращения
+
+  // Требование пополнения: при значении > 0 интерфейс клиента ограничивается до внесения депозита
+  depositRequiredAmount Decimal   @default(0)
+  depositRequiredAt     DateTime?
+
+  lastSeen          DateTime? // Последняя активность (для статуса онлайн/оффлайн)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  financialAccounts FinancialAccount[]
+  tradingAccounts   TradingAccount[]
+  transactions      Transaction[]
+  kycRequest        KycRequest?
+  tickets           Ticket[]
+  wallets           Wallet[]
+  depositTickets    DepositTicket[]
+
+  @@index([lastSeen])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// =========================
+// Accounts & Transactions
+// =========================
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  TRANSFER
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum TradingAccountType {
+  LIVE
+  DEMO
+}
+
+model FinancialAccount {
+  id               String   @id @default(cuid())
+  userId           String?
+  clientId         String?
+  number           String   @unique
+  currency         String   @default("USD")
+  balance          Decimal  @default(0)
+  availableBalance Decimal  @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user             User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  client           Client?       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  transactionsFrom Transaction[] @relation("TransactionsFromFinancial")
+  transactionsTo   Transaction[] @relation("TransactionsToFinancial")
+}
+
+model TradingAccount {
+  id               String             @id @default(cuid())
+  userId           String?
+  clientId         String?
+  number           String             @unique
+  type             TradingAccountType
+  currency         String             @default("USD")
+  balance          Decimal            @default(0)
+  availableBalance Decimal            @default(0)
+  margin           Decimal            @default(0)
+  profit           Decimal            @default(0)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  user             User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  client           Client?       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  transactionsFrom Transaction[] @relation("TransactionsFromTrading")
+  transactionsTo   Transaction[] @relation("TransactionsToTrading")
+  positions        Position[]
+  orders           Order[]
+  auditLogs        AuditLog[]
+  riskEvents       RiskEvent[]
+}
+
+model Transaction {
+  id          String            @id @default(cuid())
+  userId      String?
+  clientId    String?
+  type        TransactionType
+  status      TransactionStatus @default(PENDING)
+  amount      Decimal
+  currency    String            @default("USD")
+  description String?
+  createdAt   DateTime          @default(now())
+
+  // Optional links to source/destination accounts
+  fromFinancialAccountId String?
+  toFinancialAccountId   String?
+  fromTradingAccountId   String?
+  toTradingAccountId     String?
+
+  user                 User?             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  client               Client?           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  fromFinancialAccount FinancialAccount? @relation("TransactionsFromFinancial", fields: [fromFinancialAccountId], references: [id])
+  toFinancialAccount   FinancialAccount? @relation("TransactionsToFinancial", fields: [toFinancialAccountId], references: [id])
+  fromTradingAccount   TradingAccount?   @relation("TransactionsFromTrading", fields: [fromTradingAccountId], references: [id])
+  toTradingAccount     TradingAccount?   @relation("TransactionsToTrading", fields: [toTradingAccountId], references: [id])
+
+  @@index([userId, createdAt])
+}
+
+// =========================
+// Trading domain
+// =========================
+
+enum Side {
+  LONG
+  SHORT
+}
+
+enum MarginMode {
+  ISOLATED
+  CROSS
+}
+
+enum OrderType {
+  LIMIT
+  MARKET
+  STOP
+}
+
+enum CloseType {
+  MANUAL
+  MARKET
+  LIMIT
+  STOP_LOSS
+  TAKE_PROFIT
+  LIQUIDATION
+}
+
+enum OrderSide {
+  BUY
+  SELL
+}
+
+enum OrderStatus {
+  NEW
+  PARTIALLY_FILLED
+  FILLED
+  CANCELED
+  REJECTED
+}
+
+enum PositionStatus {
+  OPEN
+  CLOSED
+  LIQUIDATED
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum AccessLevel {
+  BASE // Базовый - плечо до 1x-5x
+  FULL // Полный - плечо до 10x-20x и выше
+}
+
+enum RiskEventKind {
+  MARGIN_CALL
+  LIQ_PARTIAL
+  LIQ_FULL
+}
+
+model Symbol {
+  id               String   @id @default(cuid())
+  name             String   @unique
+  type             String? // stock | crypto | forex | index | commodity
+  ticker           String?  @unique // Polygon/TV тикер: AAPL | X:BTCUSD | C:EURUSD | I:SPX
+  market           String? // US | crypto | forex | metals и т.д.
+  minQty           Decimal  @default(0.0001)
+  qtyStep          Decimal  @default(0.0001)
+  priceStep        Decimal  @default(0.0001)
+  allowedLeverages Json
+  mmr              Decimal
+  feeTaker         Decimal  @default(0)
+  feeMaker         Decimal  @default(0)
+  markPriceSource  String?
+  logoUrl          String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  positions  Position[]
+  orders     Order[]
+  riskEvents RiskEvent[]
+}
+
+enum PriceAdjustmentType {
+  PERCENT
+  ABSOLUTE
+}
+
+model PriceAdjustment {
+  id              String              @id @default(cuid())
+  symbolName      String
+  type            PriceAdjustmentType
+  value           Decimal
+  startAt         DateTime            @default(now())
+  endsAt          DateTime
+  durationMinutes Int
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  basePrice       Decimal?
+
+  @@index([symbolName, endsAt])
+}
+
+model Position {
+  id               String         @id @default(cuid())
+  tradingAccountId String
+  symbolId         String
+  side             Side
+  qty              Decimal
+  entryPrice       Decimal
+  exitPrice        Decimal? // Цена закрытия позиции
+  mode             MarginMode
+  leverage         Int
+  imLocked         Decimal
+  mmrCached        Decimal
+  liqPriceCached   Decimal?
+  status           PositionStatus @default(OPEN)
+  slPrice          Decimal?
+  tpPrice          Decimal?
+
+  // Дополнительные поля для админки
+  displayName       String? // Отображаемое имя актива (BTC/USD)
+  openPriceAtMoment Decimal? // Рыночная цена на момент открытия
+  closeType         CloseType? // Тип закрытия (MARKET, LIMIT, etc)
+  pnl               Decimal? // Зафиксированный PnL при закрытии
+  fee               Decimal    @default(0) // Комиссия за сделку
+  closedAt          DateTime? // Время закрытия позиции
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tradingAccount TradingAccount @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
+  symbol         Symbol         @relation(fields: [symbolId], references: [id], onDelete: Cascade)
+  orders         Order[]
+  riskEvents     RiskEvent[]
+
+  @@index([tradingAccountId])
+  @@index([symbolId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([closedAt])
+}
+
+model Order {
+  id               String      @id @default(cuid())
+  positionId       String?
+  tradingAccountId String
+  symbolId         String
+  type             OrderType
+  side             OrderSide
+  qty              Decimal
+  price            Decimal?
+  status           OrderStatus @default(NEW)
+  slPrice          Decimal?
+  tpPrice          Decimal?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  position       Position?      @relation(fields: [positionId], references: [id])
+  tradingAccount TradingAccount @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
+  symbol         Symbol         @relation(fields: [symbolId], references: [id], onDelete: Cascade)
+  fills          Fill[]
+
+  @@index([tradingAccountId])
+  @@index([symbolId])
+  @@index([status])
+}
+
+model Fill {
+  id        String   @id @default(cuid())
+  orderId   String
+  price     Decimal
+  qty       Decimal
+  fee       Decimal  @default(0)
+  createdAt DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id               String   @id @default(cuid())
+  tradingAccountId String
+  type             String
+  payload          Json
+  correlationId    String?
+  createdAt        DateTime @default(now())
+
+  tradingAccount TradingAccount @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
+
+  @@index([tradingAccountId])
+  @@index([type])
+}
+
+model RiskEvent {
+  id               String        @id @default(cuid())
+  tradingAccountId String
+  symbolId         String
+  positionId       String?
+  kind             RiskEventKind
+  snapshot         Json
+  createdAt        DateTime      @default(now())
+
+  tradingAccount TradingAccount @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
+  symbol         Symbol         @relation(fields: [symbolId], references: [id], onDelete: Cascade)
+  position       Position?      @relation(fields: [positionId], references: [id])
+
+  @@index([tradingAccountId])
+  @@index([symbolId])
+  @@index([kind])
+}
+
+model Settings {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// =========================
+// KYC (Know Your Customer)
+// =========================
+
+enum KycStatus {
+  DRAFT // Черновик - документы еще не загружены
+  PENDING // Отправлено на проверку
+  APPROVED // Одобрено
+  REJECTED // Отклонено
+  RESUBMIT // Требуется повторная отправка
+}
+
+model KycRequest {
+  id            String    @id @default(cuid())
+  clientId      String    @unique
+  documentFront String? // Путь к фото лицевой стороны документа
+  documentBack  String? // Путь к фото обратной стороны документа / селфи
+  status        KycStatus @default(DRAFT)
+  submittedAt   DateTime? // Когда отправлено на проверку
+  reviewedAt    DateTime? // Когда рассмотрено
+  reviewedBy    String? // ID админа который рассмотрел
+  reviewNotes   String?   @db.Text // Комментарии админа
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([submittedAt])
+}
+
+// =========================
+// Support Tickets
+// =========================
+
+enum TicketStatus {
+  OPEN // Открыт
+  IN_PROGRESS // В работе
+  AWAITING_REPLY // Ожидает ответа клиента
+  RESOLVED // Решен
+  CLOSED // Закрыт
+}
+
+enum TicketPriority {
+  LOW // Низкий
+  MEDIUM // Средний
+  HIGH // Высокий
+  URGENT // Срочный
+}
+
+model Ticket {
+  id         String         @id @default(cuid())
+  clientId   String
+  subject    String // Тема обращения
+  status     TicketStatus   @default(OPEN)
+  priority   TicketPriority @default(MEDIUM)
+  assignedTo String? // ID админа назначенного на тикет
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  closedAt   DateTime? // Дата закрытия
+
+  client   Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  messages TicketMessage[]
+
+  @@index([clientId])
+  @@index([status])
+  @@index([priority])
+  @@index([createdAt])
+}
+
+model TicketMessage {
+  id          String   @id @default(cuid())
+  ticketId    String
+  senderId    String // ID отправителя (Client или User)
+  senderType  String // 'CLIENT' или 'ADMIN'
+  message     String   @db.Text
+  attachments Json? // Массив путей к файлам
+  createdAt   DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@index([createdAt])
+}
+
+// =========================
+// Two-Factor Authentication (TOTP)
+// =========================
+
+model TwoFactor {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  secret    String
+  enabled   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// =========================
+// Crypto Wallets
+// =========================
+
+model Wallet {
+  id        String   @id // ID из внешнего wallet API
+  clientId  String
+  address   String   @unique
+  type      String // TRON, ETH, BTC и т.д.
+  createdAt DateTime @default(now())
+
+  client         Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  depositTickets DepositTicket[]
+
+  @@index([clientId])
+  @@index([address])
+}
+
+// =========================
+// Deposit Tickets
+// =========================
+
+enum DepositTicketStatus {
+  PENDING
+  COMPLETED
+  EXPIRED
+  FAILED
+}
+
+model DepositTicket {
+  id              String              @id @default(cuid())
+  ticketId        String              @unique // ID из внешнего deposit API (DEP-LXW-ABC123DEF456)
+  clientId        String
+  walletId        String // Ссылка на Wallet
+  amount          Decimal // Ожидаемая сумма
+  receivedAmount  Decimal? // Полученная сумма
+  walletAddress   String // Адрес кошелька
+  walletType      String // TRON, ETH, BTC и т.д.
+  currency        String // TRX, ETH, BTC и т.д.
+  status          DepositTicketStatus @default(PENDING)
+  receivingTxId   String? // Transaction ID из блокчейна
+  expiresAt       DateTime // Когда истекает тикет
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+  @@index([walletId])
+  @@index([ticketId])
+  @@index([status])
+  @@index([expiresAt])
+}

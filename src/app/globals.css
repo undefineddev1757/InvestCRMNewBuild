@@ -1,0 +1,240 @@
+@import url('https://cdnjs.cloudflare.com/ajax/libs/intl-tel-input/17.0.8/css/intlTelInput.css');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Скрываем ватермарк KLineChartPro */
+.klinecharts-watermark,
+[class*="watermark"],
+[class*="Watermark"],
+.klinecharts-pro-watermark,
+div[style*="watermark"],
+div[style*="Watermark"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
+/* Дополнительные селекторы для скрытия ватермарка */
+.klinecharts-pro .watermark,
+.klinecharts-pro [class*="watermark"],
+.klinecharts-pro [class*="Watermark"] {
+  display: none !important;
+}
+
+@keyframes loading-bar {
+  0% {
+    width: 0%;
+  }
+  50% {
+    width: 70%;
+  }
+  100% {
+    width: 100%;
+  }
+}
+
+.animate-loading-bar {
+  animation: loading-bar 0.3s ease-out forwards;
+}
+
+/* Тут будуть стилі для нового графіка */
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 3.9%;
+    --primary: 0 0% 9%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 96.1%;
+    --secondary-foreground: 0 0% 9%;
+    --muted: 0 0% 96.1%;
+    --muted-foreground: 0 0% 45.1%;
+    --accent: 0 0% 96.1%;
+    --accent-foreground: 0 0% 9%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 89.8%;
+    --input: 0 0% 89.8%;
+    --ring: 0 0% 3.9%;
+    --radius: 0.5rem;
+    --chart-1: 12 76% 61%;
+    --chart-2: 173 58% 39%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+  }
+
+  .dark {
+    /* Slightly bluer dark palette */
+    /* background close to #0F111A but a bit more blue */
+    --background: 225 32% 7%;
+    --foreground: 0 0% 98%;
+    /* cards/panels around #1B1F2A with extra blue */
+    --card: 225 26% 15%;
+    --card-foreground: 0 0% 98%;
+    --popover: 225 26% 15%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 9%;
+    --secondary: 225 26% 16%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 225 26% 18%;
+    --muted-foreground: 0 0% 64%;
+    --accent: 225 26% 19%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 225 24% 24%;
+    --input: 225 24% 24%;
+    --ring: 225 30% 42%;
+    --chart-1: 221 70% 56%;
+    --chart-2: 199 70% 50%;
+    --chart-3: 160 60% 45%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+  }
+}
+
+/* KLineCharts Pro theme variables */
+:root .klinecharts-pro {
+  --klinecharts-pro-primary-color: #1677ff;
+  --klinecharts-pro-hover-background-color: rgba(22, 119, 255, 0.15);
+  --klinecharts-pro-background-color: #ffffff;
+  --klinecharts-pro-popover-background-color: #ffffff;
+  --klinecharts-pro-text-color: #051441;
+  --klinecharts-pro-text-second-color: #76808f;
+  --klinecharts-pro-border-color: #ebedf1;
+  --klinecharts-pro-selected-color: rgba(22, 119, 255, 0.15);
+}
+
+.dark .klinecharts-pro,
+.klinecharts-pro[data-theme="dark"] {
+  --klinecharts-pro-hover-background-color: rgba(22, 119, 255, 0.15);
+  --klinecharts-pro-background-color: #151517;
+  --klinecharts-pro-popover-background-color: #1c1c1f;
+  --klinecharts-pro-text-color: #f8f8f8;
+  --klinecharts-pro-text-second-color: #929aa5;
+  --klinecharts-pro-border-color: #292929;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Стабилизируем появление вертикального скроллбара, чтобы не прыгал лэйаут */
+html {
+  scrollbar-gutter: stable both-edges;
+}
+
+/* Intl Tel Input Styles */
+.iti {
+  width: 100% !important;
+  position: relative !important;
+}
+
+.iti__country-list {
+  z-index: 1000 !important;
+  border: 1px solid hsl(var(--border)) !important;
+  border-radius: 0.375rem !important;
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1) !important;
+  background: hsl(var(--background)) !important;
+  max-height: 200px !important;
+  overflow-y: auto !important;
+}
+
+.iti__country {
+  color: hsl(var(--foreground)) !important;
+  padding: 0.5rem !important;
+  cursor: pointer !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.5rem !important;
+}
+
+.iti__country:hover {
+  background: hsl(var(--accent)) !important;
+}
+
+.iti__country.iti__highlight {
+  background: hsl(var(--accent)) !important;
+}
+
+.iti__flag {
+  border-radius: 2px !important;
+  border: none !important;
+  width: 20px !important;
+  height: 15px !important;
+}
+
+.iti__arrow {
+  border-top-color: hsl(var(--muted-foreground)) !important;
+  border-left: 4px solid transparent !important;
+  border-right: 4px solid transparent !important;
+  border-top: 4px solid hsl(var(--muted-foreground)) !important;
+  border-bottom: none !important;
+}
+
+.iti__arrow--up {
+  border-bottom-color: hsl(var(--muted-foreground)) !important;
+  border-top: none !important;
+  border-bottom: 4px solid hsl(var(--muted-foreground)) !important;
+}
+
+.iti__selected-flag {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 0.5rem !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.5rem !important;
+  cursor: pointer !important;
+}
+
+.iti__selected-flag:hover {
+  background: hsl(var(--accent)) !important;
+}
+
+.iti__selected-flag:focus {
+  background: hsl(var(--accent)) !important;
+}
+
+.iti__country-name {
+  color: hsl(var(--foreground)) !important;
+  font-size: 0.875rem !important;
+}
+
+.iti__dial-code {
+  color: hsl(var(--muted-foreground)) !important;
+  font-size: 0.875rem !important;
+}
+
+.iti__input {
+  border: none !important;
+  outline: none !important;
+  background: transparent !important;
+  width: 100% !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.iti__input:focus {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.iti__input::placeholder {
+  color: hsl(var(--muted-foreground)) !important;
+  opacity: 1 !important;
+}
