@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -e
 
 # One-shot installer: builds and runs the stack via Docker,
 # creates .env, seeds passwords/secrets, patches nginx domain,
@@ -74,6 +74,11 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 
 ENV_FILE="$PROJECT_ROOT/.env"
+RECREATE_DB=false
+
+# Останавливаем все контейнеры перед началом
+echo "🛑 Останавливаем существующие контейнеры..."
+docker compose down 2>/dev/null || true
 
 # Проверка наличия .env файла
 if [ ! -f "$ENV_FILE" ]; then
@@ -114,10 +119,28 @@ EOF
     echo "✅ Создан .env файл с автоматически сгенерированными секретами."
     echo "📍 Файл находится в: $ENV_FILE"
     echo "💡 Вы можете отредактировать его и добавить свои значения для WALLET_API_KEY и POLYGON_API_KEY"
+    
+    # Если создаем новый .env, пересоздаем базу данных чтобы пароль совпал
+    RECREATE_DB=true
 else
     echo "ℹ️ .env файл уже существует, используем его."
     PRIMARY_DOMAIN=$(grep NEXTAUTH_URL "$ENV_FILE" | cut -d'=' -f2 | sed 's|https\?://||' | awk '{print $1}' || echo "localhost")
     DOMAIN="${PRIMARY_DOMAIN}"
+    
+    # Проверяем, существует ли база данных с другим паролем
+    if docker volume ls | grep -q "${PROJECT_ROOT##*/}_postgres_data\|crm_postgres_data"; then
+        echo "⚠️ Найдена существующая база данных."
+        echo "🔄 Пересоздаём базу данных чтобы пароль совпал с .env..."
+        RECREATE_DB=true
+    fi
+fi
+
+# Пересоздаем базу данных если нужно
+if [ "$RECREATE_DB" = true ]; then
+    echo "🗑️ Удаляем старую базу данных..."
+    docker compose down -v 2>/dev/null || true
+    # Ждем немного чтобы volumes освободились
+    sleep 2
 fi
 
 NGINX_CONF="$PROJECT_ROOT/nginx/conf.d/default.conf"
@@ -149,41 +172,86 @@ else
   echo "ℹ️ Найдены существующие SSL сертификаты, переиспользую."
 fi
 
-echo "➡️ Запускаем PostgreSQL..."
+echo ""
+echo "═══════════════════════════════════════════════════════════"
+echo "🚀 ЗАПУСК ВСЕХ СЕРВИСОВ"
+echo "═══════════════════════════════════════════════════════════"
+
+echo ""
+echo "1️⃣ Запускаем PostgreSQL..."
 docker compose up -d postgres
 
-echo "➡️ Ждём готовность Postgres..."
-for _ in {1..30}; do
-  if docker compose exec postgres pg_isready -U investcrm_user -d investcrm >/dev/null 2>&1; then
-    echo "✅ Postgres готов"
+echo ""
+echo "2️⃣ Ждём готовность PostgreSQL (максимум 60 секунд)..."
+POSTGRES_READY=false
+for i in {1..30}; do
+  if docker compose exec -T postgres pg_isready -U investcrm_user -d investcrm >/dev/null 2>&1; then
+    echo "✅ PostgreSQL готов!"
+    POSTGRES_READY=true
     break
   fi
+  echo "   Ожидание... ($i/30)"
   sleep 2
 done
 
-echo "➡️ Применяем миграции Prisma..."
-# Сначала собираем образ, чтобы prisma был доступен
+if [ "$POSTGRES_READY" = false ]; then
+  echo "❌ PostgreSQL не запустился за 60 секунд!"
+  echo "Проверьте логи: docker compose logs postgres"
+  exit 1
+fi
+
+echo ""
+echo "3️⃣ Собираем образ приложения..."
 docker compose build app
-# Используем env_file чтобы переменные из .env подхватились
-docker compose run --rm --env-file .env app ./node_modules/.bin/prisma migrate deploy || {
-    echo "⚠️ Ошибка при применении миграций, возможно база данных уже инициализирована. Продолжаем..."
-}
-
-echo "➡️ Сборка и запуск сервисов..."
-docker compose up -d --build
 
 echo ""
-echo "✅ Готово! Все сервисы запущены."
+echo "4️⃣ Применяем миграции Prisma..."
+if docker compose run --rm --env-file .env app ./node_modules/.bin/prisma migrate deploy; then
+    echo "✅ Миграции применены успешно"
+else
+    echo "⚠️ Ошибка при применении миграций, проверяем..."
+    # Проверяем, может быть миграции уже применены
+    if docker compose run --rm --env-file .env app ./node_modules/.bin/prisma migrate status 2>&1 | grep -q "Database schema is up to date"; then
+        echo "✅ База данных уже актуальна"
+    else
+        echo "❌ Критическая ошибка при применении миграций!"
+        echo "Проверьте логи и .env файл"
+        exit 1
+    fi
+fi
+
 echo ""
-echo "📊 Статус контейнеров:"
+echo "5️⃣ Запускаем все сервисы..."
+docker compose up -d
+
+echo ""
+echo "6️⃣ Ждём запуск приложения (10 секунд)..."
+sleep 10
+
+echo ""
+echo "7️⃣ Проверяем статус контейнеров..."
 docker compose ps
+
+echo ""
+echo "═══════════════════════════════════════════════════════════"
+echo "✅ УСТАНОВКА ЗАВЕРШЕНА!"
+echo "═══════════════════════════════════════════════════════════"
 echo ""
 echo "📍 Приложение доступно по адресу: http://${PRIMARY_DOMAIN}"
-echo "💡 Для настройки домена и SSL отредактируйте .env файл и перезапустите:"
-echo "   docker compose restart nginx app"
 echo ""
 echo "📝 Файл .env находится в: $ENV_FILE"
-echo "   Вы можете добавить свои значения для:"
+echo "   Вы можете отредактировать его и добавить:"
 echo "   - WALLET_API_KEY"
 echo "   - POLYGON_API_KEY"
+echo ""
+echo "📊 Проверка статуса:"
+echo "   docker compose ps"
+echo ""
+echo "📋 Просмотр логов:"
+echo "   docker compose logs -f"
+echo ""
+echo "🔄 Перезапуск сервисов:"
+echo "   docker compose restart"
+echo ""
+echo "═══════════════════════════════════════════════════════════"
 
