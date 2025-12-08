@@ -149,8 +149,11 @@ for _ in {1..30}; do
 done
 
 echo "➡️ Применяем миграции Prisma..."
+# Очищаем кеш Docker перед сборкой (если были проблемы)
+echo "🧹 Очищаем кеш Docker..."
+docker builder prune -f || true
 # Сначала собираем образ, чтобы prisma был доступен
-docker compose build app
+docker compose build --no-cache app
 # Используем env_file чтобы переменные из .env подхватились
 docker compose run --rm --env-file .env app ./node_modules/.bin/prisma migrate deploy
 
