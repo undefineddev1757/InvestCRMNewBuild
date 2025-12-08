@@ -149,7 +149,9 @@ for _ in {1..30}; do
 done
 
 echo "➡️ Применяем миграции Prisma..."
-docker compose run --rm app npx prisma@5.7.0 migrate deploy
+# Сначала собираем образ, чтобы prisma был доступен
+docker compose build app
+docker compose run --rm app ./node_modules/.bin/prisma migrate deploy
 
 echo "➡️ Сборка и запуск сервисов..."
 docker compose up -d --build

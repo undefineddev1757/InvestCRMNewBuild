@@ -149,7 +149,9 @@ done
 
 # Применение миграций Prisma
 echo "🔄 Применяем миграции Prisma..."
-docker compose -f "${DEPLOY_DIR}/docker-compose.yml" run --rm app npx prisma@5.7.0 migrate deploy || {
+# Сначала собираем образ, чтобы prisma был доступен
+docker compose -f "${DEPLOY_DIR}/docker-compose.yml" build app
+docker compose -f "${DEPLOY_DIR}/docker-compose.yml" run --rm app ./node_modules/.bin/prisma migrate deploy || {
     echo "⚠️ Ошибка при применении миграций. Продолжаем..."
 }
 
