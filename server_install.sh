@@ -5,7 +5,52 @@ set -euo pipefail
 # creates .env, seeds passwords/secrets, patches nginx domain,
 # runs Prisma migrations.
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Определяем директорию деплоя
+DEPLOY_DIR="${1:-/var/crm}"
+SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CURRENT_DIR="$(pwd)"
+
+# Флаг, что мы уже в директории деплоя (передается через переменную окружения)
+if [ -z "${DEPLOYED_FROM:-}" ] && [ "$SOURCE_DIR" != "$DEPLOY_DIR" ]; then
+    echo "🚀 Копируем проект в ${DEPLOY_DIR}..."
+    
+    # Проверка прав root для /var/crm
+    if [[ "$DEPLOY_DIR" == /var/* ]] && [ "$EUID" -ne 0 ]; then
+        echo "❌ Для деплоя в ${DEPLOY_DIR} требуются права root. Используйте: sudo $0"
+        exit 1
+    fi
+    
+    # Создание директории деплоя
+    mkdir -p "${DEPLOY_DIR}"
+    
+    # Копирование файлов (используем cp если rsync недоступен)
+    if command -v rsync >/dev/null 2>&1; then
+        rsync -av --progress \
+            --exclude='.git' \
+            --exclude='node_modules' \
+            --exclude='.next' \
+            --exclude='.env' \
+            --exclude='*.log' \
+            --exclude='ngrok.log' \
+            --exclude='.DS_Store' \
+            "${SOURCE_DIR}/" "${DEPLOY_DIR}/"
+    else
+        echo "⚠️ rsync не найден, используем cp..."
+        cp -r "${SOURCE_DIR}"/* "${DEPLOY_DIR}/" 2>/dev/null || true
+        cp -r "${SOURCE_DIR}"/.[!.]* "${DEPLOY_DIR}/" 2>/dev/null || true
+        # Удаляем ненужные файлы
+        rm -rf "${DEPLOY_DIR}/.git" "${DEPLOY_DIR}/node_modules" "${DEPLOY_DIR}/.next" 2>/dev/null || true
+    fi
+    
+    echo "✅ Проект скопирован в ${DEPLOY_DIR}"
+    echo "🔄 Запускаем установку из ${DEPLOY_DIR}..."
+    
+    # Запускаем скрипт из директории деплоя с флагом
+    DEPLOYED_FROM="$SOURCE_DIR" exec bash "${DEPLOY_DIR}/server_install.sh" "$DEPLOY_DIR"
+fi
+
+# Работаем из директории деплоя
+PROJECT_ROOT="${DEPLOY_DIR}"
 cd "$PROJECT_ROOT"
 
 require_cmd() {
