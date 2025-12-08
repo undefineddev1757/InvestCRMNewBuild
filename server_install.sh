@@ -149,7 +149,7 @@ for _ in {1..30}; do
 done
 
 echo "➡️ Применяем миграции Prisma..."
-docker compose run --rm app npx prisma migrate deploy
+docker compose run --rm app npx prisma@5.7.0 migrate deploy
 
 echo "➡️ Сборка и запуск сервисов..."
 docker compose up -d --build

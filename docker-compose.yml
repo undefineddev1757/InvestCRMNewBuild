@@ -56,7 +56,7 @@ services:
       sh -c "
         echo 'Waiting for database...' &&
         sleep 5 &&
-        npx prisma migrate deploy &&
+        npx prisma@5.7.0 migrate deploy &&
         echo 'Starting application...' &&
         node server.js
       "
