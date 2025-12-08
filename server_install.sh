@@ -151,7 +151,8 @@ done
 echo "➡️ Применяем миграции Prisma..."
 # Сначала собираем образ, чтобы prisma был доступен
 docker compose build app
-docker compose run --rm app ./node_modules/.bin/prisma migrate deploy
+# Используем env_file чтобы переменные из .env подхватились
+docker compose run --rm --env-file .env app ./node_modules/.bin/prisma migrate deploy
 
 echo "➡️ Сборка и запуск сервисов..."
 docker compose up -d --build

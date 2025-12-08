@@ -151,7 +151,8 @@ done
 echo "🔄 Применяем миграции Prisma..."
 # Сначала собираем образ, чтобы prisma был доступен
 docker compose -f "${DEPLOY_DIR}/docker-compose.yml" build app
-docker compose -f "${DEPLOY_DIR}/docker-compose.yml" run --rm app ./node_modules/.bin/prisma migrate deploy || {
+# Используем env_file чтобы переменные из .env подхватились
+docker compose -f "${DEPLOY_DIR}/docker-compose.yml" run --rm --env-file "${DEPLOY_DIR}/.env" app ./node_modules/.bin/prisma migrate deploy || {
     echo "⚠️ Ошибка при применении миграций. Продолжаем..."
 }
 

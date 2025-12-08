@@ -27,6 +27,8 @@ services:
         - NEXT_PUBLIC_POLYGON_API_KEY=${POLYGON_API_KEY:-}
     container_name: investcrm_app
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://investcrm_user:${POSTGRES_PASSWORD:-change_me_in_production}@postgres:5432/investcrm?schema=public
