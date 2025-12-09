@@ -6,7 +6,7 @@ set -e
 # runs Prisma migrations.
 
 # Определяем директорию деплоя
-DEPLOY_DIR="${1:-/var/crm}"
+DEPLOY_DIR="${1:-/var/www/crm}"
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CURRENT_DIR="$(pwd)"
 

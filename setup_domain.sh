@@ -7,7 +7,7 @@ set -e
 # ===========================================
 
 DOMAIN="${1:-}"
-PROJECT_DIR="${2:-/var/crm}"
+PROJECT_DIR="${2:-/var/www/crm}"
 
 if [ -z "$DOMAIN" ]; then
     echo "🌐 Введите домен для CRM:"
