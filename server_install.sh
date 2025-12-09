@@ -204,15 +204,16 @@ echo "4️⃣ Применяем миграции Prisma..."
 # Получаем пароль из .env
 POSTGRES_PASSWORD=$(grep POSTGRES_PASSWORD "$ENV_FILE" | cut -d'=' -f2)
 
-# Запускаем миграции напрямую через временный контейнер с prisma
+# Получаем имя собранного образа app
+APP_IMAGE=$(docker compose config --images | grep app || echo "crm-app")
+
+# Запускаем миграции через собранный app образ (в нём уже есть OpenSSL и Prisma)
 echo "   Запуск prisma migrate deploy..."
 docker run --rm \
     --network="investcrm_network" \
     -e DATABASE_URL="postgresql://investcrm_user:${POSTGRES_PASSWORD}@investcrm_postgres:5432/investcrm?schema=public" \
-    -v "${PROJECT_ROOT}/prisma:/app/prisma" \
-    -w /app \
-    node:20-slim \
-    sh -c "npm install prisma@5.7.0 @prisma/client@5.7.0 --silent 2>/dev/null && npx prisma migrate deploy 2>&1"
+    "${APP_IMAGE}" \
+    npx prisma migrate deploy 2>&1
 
 MIGRATE_EXIT_CODE=$?
 
@@ -226,10 +227,8 @@ else
     MIGRATE_STATUS=$(docker run --rm \
         --network="investcrm_network" \
         -e DATABASE_URL="postgresql://investcrm_user:${POSTGRES_PASSWORD}@investcrm_postgres:5432/investcrm?schema=public" \
-        -v "${PROJECT_ROOT}/prisma:/app/prisma" \
-        -w /app \
-        node:20-slim \
-        sh -c "npm install prisma@5.7.0 --silent 2>/dev/null && npx prisma migrate status 2>&1")
+        "${APP_IMAGE}" \
+        npx prisma migrate status 2>&1)
     
     echo "$MIGRATE_STATUS"
     
