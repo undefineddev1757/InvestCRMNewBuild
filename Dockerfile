@@ -51,16 +51,17 @@ ENV npm_config_cache=/app/.npm
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+
+# Copy Prisma client (generated)
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
-COPY --from=builder /app/node_modules/.bin ./node_modules/.bin
+
+# Copy prisma schema for migrations (if needed later)
 COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/package.json ./package.json
+
 # Copy required runtime dependencies
 COPY --from=builder /app/node_modules/bcryptjs ./node_modules/bcryptjs
 COPY --from=builder /app/node_modules/jsonwebtoken ./node_modules/jsonwebtoken
-COPY --from=builder /app/node_modules/@types ./node_modules/@types
 
 # Set correct permissions
 RUN chown -R nextjs:nodejs /app

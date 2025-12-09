@@ -54,14 +54,6 @@ services:
       - investcrm_network
     volumes:
       - ./public/uploads:/app/public/uploads
-    entrypoint: >
-      sh -c "
-        echo 'Waiting for database...' &&
-        sleep 5 &&
-        ./node_modules/.bin/prisma migrate deploy &&
-        echo 'Starting application...' &&
-        node server.js
-      "
 
   nginx:
     image: nginx:alpine
@@ -87,4 +79,5 @@ volumes:
 
 networks:
   investcrm_network:
+    name: investcrm_network
     driver: bridge

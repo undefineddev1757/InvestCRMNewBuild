@@ -126,13 +126,7 @@ else
     echo "ℹ️ .env файл уже существует, используем его."
     PRIMARY_DOMAIN=$(grep NEXTAUTH_URL "$ENV_FILE" | cut -d'=' -f2 | sed 's|https\?://||' | awk '{print $1}' || echo "localhost")
     DOMAIN="${PRIMARY_DOMAIN}"
-    
-    # Проверяем, существует ли база данных с другим паролем
-    if docker volume ls | grep -q "${PROJECT_ROOT##*/}_postgres_data\|crm_postgres_data"; then
-        echo "⚠️ Найдена существующая база данных."
-        echo "🔄 Пересоздаём базу данных чтобы пароль совпал с .env..."
-        RECREATE_DB=true
-    fi
+    # Не пересоздаём базу данных если .env уже существует
 fi
 
 # Пересоздаем базу данных если нужно
@@ -206,16 +200,46 @@ docker compose build app
 
 echo ""
 echo "4️⃣ Применяем миграции Prisma..."
-if docker compose run --rm --env-file .env app ./node_modules/.bin/prisma migrate deploy; then
+
+# Получаем пароль из .env
+POSTGRES_PASSWORD=$(grep POSTGRES_PASSWORD "$ENV_FILE" | cut -d'=' -f2)
+
+# Запускаем миграции напрямую через временный контейнер с prisma
+echo "   Запуск prisma migrate deploy..."
+docker run --rm \
+    --network="investcrm_network" \
+    -e DATABASE_URL="postgresql://investcrm_user:${POSTGRES_PASSWORD}@investcrm_postgres:5432/investcrm?schema=public" \
+    -v "${PROJECT_ROOT}/prisma:/app/prisma" \
+    -w /app \
+    node:20-slim \
+    sh -c "npm install prisma@5.7.0 @prisma/client@5.7.0 --silent 2>/dev/null && npx prisma migrate deploy 2>&1"
+
+MIGRATE_EXIT_CODE=$?
+
+if [ $MIGRATE_EXIT_CODE -eq 0 ]; then
     echo "✅ Миграции применены успешно"
 else
-    echo "⚠️ Ошибка при применении миграций, проверяем..."
-    # Проверяем, может быть миграции уже применены
-    if docker compose run --rm --env-file .env app ./node_modules/.bin/prisma migrate status 2>&1 | grep -q "Database schema is up to date"; then
+    echo "⚠️ Код выхода миграций: $MIGRATE_EXIT_CODE"
+    echo "Проверяем статус базы данных..."
+    
+    # Проверяем статус
+    MIGRATE_STATUS=$(docker run --rm \
+        --network="investcrm_network" \
+        -e DATABASE_URL="postgresql://investcrm_user:${POSTGRES_PASSWORD}@investcrm_postgres:5432/investcrm?schema=public" \
+        -v "${PROJECT_ROOT}/prisma:/app/prisma" \
+        -w /app \
+        node:20-slim \
+        sh -c "npm install prisma@5.7.0 --silent 2>/dev/null && npx prisma migrate status 2>&1")
+    
+    echo "$MIGRATE_STATUS"
+    
+    # Если база данных актуальна - это ОК
+    if echo "$MIGRATE_STATUS" | grep -q "Database schema is up to date"; then
         echo "✅ База данных уже актуальна"
     else
+        echo ""
         echo "❌ Критическая ошибка при применении миграций!"
-        echo "Проверьте логи и .env файл"
+        echo "Проверьте логи выше и .env файл"
         exit 1
     fi
 fi
