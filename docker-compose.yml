@@ -46,7 +46,7 @@ services:
       - EMAIL_SERVER_PASSWORD=${EMAIL_SERVER_PASSWORD:-}
       - EMAIL_FROM=${EMAIL_FROM:-}
     ports:
-      - "3000:3000"
+      - "${APP_PORT:-127.0.0.1:3001}:3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -55,10 +55,13 @@ services:
     volumes:
       - ./public/uploads:/app/public/uploads
 
+  # Nginx - опциональный, запускается только если порты 80/443 свободны
   nginx:
     image: nginx:alpine
     container_name: investcrm_nginx
     restart: unless-stopped
+    profiles:
+      - with-nginx
     ports:
       - "80:80"
       - "443:443"

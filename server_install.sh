@@ -137,33 +137,122 @@ if [ "$RECREATE_DB" = true ]; then
     sleep 2
 fi
 
-NGINX_CONF="$PROJECT_ROOT/nginx/conf.d/default.conf"
-if [ -f "$NGINX_CONF" ]; then
-  # Обновляем server_name только если домен не localhost
-  if [ "$DOMAIN" != "localhost" ] && [ "$DOMAIN" != "_" ]; then
-    cp "$NGINX_CONF" "${NGINX_CONF}.bak" 2>/dev/null || true
-    sed -i.bak "s/server_name _.*/server_name ${DOMAIN};/" "$NGINX_CONF" 2>/dev/null || true
-    sed -i.bak "s/server_name _;  # Замените на ваш домен/server_name ${DOMAIN};/" "$NGINX_CONF" 2>/dev/null || true
-    echo "✅ Обновлён nginx server_name -> ${DOMAIN}"
-  else
-    echo "ℹ️ Используется стандартная конфигурация nginx (server_name _)"
-  fi
+# Создаём директорию для uploads
+mkdir -p "$PROJECT_ROOT/public/uploads"
+
+# ===========================================
+# Определяем режим работы nginx
+# ===========================================
+USE_BUILTIN_NGINX=false
+
+# Проверяем, можно ли использовать встроенный nginx
+check_port() {
+    ! (ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null) | grep -q ":$1 "
+}
+
+# Можно принудительно задать через переменную: NGINX_MODE=builtin или NGINX_MODE=external
+if [ "${NGINX_MODE:-}" = "builtin" ]; then
+    USE_BUILTIN_NGINX=true
+    echo "ℹ️ Принудительно используем встроенный nginx (NGINX_MODE=builtin)"
+elif [ "${NGINX_MODE:-}" = "external" ]; then
+    USE_BUILTIN_NGINX=false
+    echo "ℹ️ Принудительно используем внешний nginx (NGINX_MODE=external)"
 else
-  echo "⚠️ nginx/conf.d/default.conf не найден, пропущено."
+    # Автоопределение
+    if check_port 80 && check_port 443; then
+        USE_BUILTIN_NGINX=true
+        echo "✅ Порты 80 и 443 свободны - используем встроенный nginx"
+    else
+        USE_BUILTIN_NGINX=false
+        echo "ℹ️ Порты 80/443 заняты - используем внешний nginx (app на порту 3001)"
+    fi
 fi
 
-SSL_DIR="$PROJECT_ROOT/nginx/ssl"
-LE_DIR="$PROJECT_ROOT/nginx/letsencrypt"
-CB_DIR="$PROJECT_ROOT/nginx/certbot"
-mkdir -p "$SSL_DIR" "$LE_DIR" "$CB_DIR" "$PROJECT_ROOT/public/uploads"
-
-if [ ! -f "$SSL_DIR/cert.pem" ] || [ ! -f "$SSL_DIR/key.pem" ]; then
-  openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-    -subj "/CN=${PRIMARY_DOMAIN:-localhost}" \
-    -keyout "$SSL_DIR/key.pem" -out "$SSL_DIR/cert.pem" 2>/dev/null
-  echo "✅ Сгенерирован самоподписанный SSL сертификат"
+# Настраиваем nginx конфиги если используем встроенный
+if [ "$USE_BUILTIN_NGINX" = true ]; then
+    # Создаём директории для nginx
+    SSL_DIR="$PROJECT_ROOT/nginx/ssl"
+    LE_DIR="$PROJECT_ROOT/nginx/letsencrypt"
+    CB_DIR="$PROJECT_ROOT/nginx/certbot"
+    mkdir -p "$SSL_DIR" "$LE_DIR" "$CB_DIR" "$PROJECT_ROOT/nginx/logs"
+    
+    # Обновляем server_name в nginx конфиге
+    NGINX_CONF="$PROJECT_ROOT/nginx/conf.d/default.conf"
+    if [ -f "$NGINX_CONF" ] && [ "$DOMAIN" != "localhost" ] && [ "$DOMAIN" != "_" ]; then
+        sed -i.bak "s/server_name _.*/server_name ${DOMAIN};/g" "$NGINX_CONF" 2>/dev/null || true
+        echo "✅ Обновлён nginx server_name -> ${DOMAIN}"
+    fi
+    
+    # Генерируем самоподписанный сертификат если нет
+    if [ ! -f "$SSL_DIR/cert.pem" ] || [ ! -f "$SSL_DIR/key.pem" ]; then
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+            -subj "/CN=${PRIMARY_DOMAIN:-localhost}" \
+            -keyout "$SSL_DIR/key.pem" -out "$SSL_DIR/cert.pem" 2>/dev/null
+        echo "✅ Сгенерирован самоподписанный SSL сертификат"
+    fi
+    
+    # Порт app внутри сети
+    export APP_PORT="3000:3000"
 else
-  echo "ℹ️ Найдены существующие SSL сертификаты, переиспользую."
+    # App слушает только на localhost:3001
+    export APP_PORT="127.0.0.1:3001:3000"
+    
+    # Генерируем конфиг для внешнего nginx
+    cat > "$PROJECT_ROOT/nginx-site.conf" <<NGINXEOF
+# Конфигурация для ${PRIMARY_DOMAIN}
+# Скопируйте: cp ${PROJECT_ROOT}/nginx-site.conf /etc/nginx/sites-available/${PRIMARY_DOMAIN}.conf
+# Активируйте: ln -sf /etc/nginx/sites-available/${PRIMARY_DOMAIN}.conf /etc/nginx/sites-enabled/
+# Проверьте: nginx -t && systemctl reload nginx
+
+server {
+    listen 80;
+    server_name ${PRIMARY_DOMAIN} www.${PRIMARY_DOMAIN};
+    
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+    
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name ${PRIMARY_DOMAIN} www.${PRIMARY_DOMAIN};
+
+    # SSL - раскомментируйте после получения сертификата:
+    # certbot certonly --webroot -w /var/www/certbot -d ${PRIMARY_DOMAIN}
+    ssl_certificate /etc/letsencrypt/live/${PRIMARY_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${PRIMARY_DOMAIN}/privkey.pem;
+    
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+
+    location / {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \$http_upgrade;
+        proxy_read_timeout 300s;
+    }
+
+    location /_next/static {
+        proxy_pass http://127.0.0.1:3001;
+        add_header Cache-Control "public, immutable, max-age=31536000";
+    }
+}
+NGINXEOF
+    echo "✅ Создан конфиг для внешнего nginx: ${PROJECT_ROOT}/nginx-site.conf"
 fi
 
 echo ""
@@ -245,7 +334,11 @@ fi
 
 echo ""
 echo "5️⃣ Запускаем все сервисы..."
-docker compose up -d
+if [ "$USE_BUILTIN_NGINX" = true ]; then
+    docker compose --profile with-nginx up -d
+else
+    docker compose up -d
+fi
 
 echo ""
 echo "6️⃣ Ждём запуск приложения (10 секунд)..."
@@ -260,21 +353,39 @@ echo "════════════════════════�
 echo "✅ УСТАНОВКА ЗАВЕРШЕНА!"
 echo "═══════════════════════════════════════════════════════════"
 echo ""
-echo "📍 Приложение доступно по адресу: http://${PRIMARY_DOMAIN}"
+
+if [ "$USE_BUILTIN_NGINX" = true ]; then
+    echo "🌐 Приложение доступно:"
+    echo "   http://${PRIMARY_DOMAIN}"
+    echo "   https://${PRIMARY_DOMAIN} (самоподписанный сертификат)"
+    echo ""
+    echo "🔒 Для получения Let's Encrypt сертификата:"
+    echo "   docker compose exec nginx certbot --nginx -d ${PRIMARY_DOMAIN}"
+else
+    echo "🌐 Приложение слушает на: 127.0.0.1:3001"
+    echo ""
+    echo "🔧 НАСТРОЙТЕ ВАШ NGINX:"
+    echo "   1. Скопируйте конфиг:"
+    echo "      cp ${PROJECT_ROOT}/nginx-site.conf /etc/nginx/sites-available/${PRIMARY_DOMAIN}.conf"
+    echo ""
+    echo "   2. Активируйте:"
+    echo "      ln -sf /etc/nginx/sites-available/${PRIMARY_DOMAIN}.conf /etc/nginx/sites-enabled/"
+    echo ""
+    echo "   3. Получите SSL сертификат:"
+    echo "      certbot certonly --webroot -w /var/www/certbot -d ${PRIMARY_DOMAIN}"
+    echo ""
+    echo "   4. Перезагрузите nginx:"
+    echo "      nginx -t && systemctl reload nginx"
+fi
+
 echo ""
-echo "📝 Файл .env находится в: $ENV_FILE"
-echo "   Вы можете отредактировать его и добавить:"
-echo "   - WALLET_API_KEY"
-echo "   - POLYGON_API_KEY"
+echo "📝 Файл .env: $ENV_FILE"
+echo "   Не забудьте установить NEXTAUTH_URL=https://${PRIMARY_DOMAIN}"
 echo ""
-echo "📊 Проверка статуса:"
-echo "   docker compose ps"
-echo ""
-echo "📋 Просмотр логов:"
-echo "   docker compose logs -f"
-echo ""
-echo "🔄 Перезапуск сервисов:"
-echo "   docker compose restart"
+echo "📊 Команды:"
+echo "   docker compose ps          # статус"
+echo "   docker compose logs -f app # логи"
+echo "   docker compose restart     # перезапуск"
 echo ""
 echo "═══════════════════════════════════════════════════════════"
 
