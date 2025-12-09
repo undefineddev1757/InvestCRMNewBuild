@@ -190,12 +190,8 @@ if [ "$USE_BUILTIN_NGINX" = true ]; then
             -keyout "$SSL_DIR/key.pem" -out "$SSL_DIR/cert.pem" 2>/dev/null
         echo "✅ Сгенерирован самоподписанный SSL сертификат"
     fi
-    
-    # Порт app внутри сети
-    export APP_PORT="3000:3000"
 else
-    # App слушает только на localhost:3001
-    export APP_PORT="127.0.0.1:3001:3000"
+    # App слушает на localhost:3001 (доступен и для встроенного nginx через сеть, и для внешнего)
     
     # Генерируем конфиг для внешнего nginx
     cat > "$PROJECT_ROOT/nginx-site.conf" <<NGINXEOF
